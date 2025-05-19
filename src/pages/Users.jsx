@@ -19,10 +19,11 @@ const Users = () => {
     username: '',
     password: '',
     role: '',
+    email: '',  // Added email field
   });
 
   const db = new Dexie('FarmPerksDB');
-  db.version(1).stores({ users: '++id,username,role,farm_id' });
+  db.version(1).stores({ users: '++id,username,role,farm_id,email' }); // Updated to include email
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -51,7 +52,7 @@ const Users = () => {
   const openModal = () => setModalIsOpen(true);
   const closeModal = () => {
     setModalIsOpen(false);
-    setFormData({ id: null, username: '', password: '', role: '' });
+    setFormData({ id: null, username: '', password: '', role: '', email: '' }); // Reset email
   };
 
   const showToast = (message, type = 'success') => {
@@ -70,6 +71,7 @@ const Users = () => {
         username: formData.username,
         password: formData.password,
         role: formData.role,
+        email: formData.email,  // Added email to payload
       };
       if (formData.id) {
         const updatePayload = { ...payload };
@@ -111,6 +113,7 @@ const Users = () => {
       username: user.username || '',
       password: '',
       role: user.role || '',
+      email: user.email || '',  // Set email from user data
     });
     openModal();
   };
@@ -154,6 +157,7 @@ const Users = () => {
             <tr className="bg-farmGreen text-white">
               <th className="p-3 text-left text-sm font-semibold">Username</th>
               <th className="p-3 text-left text-sm font-semibold">Role</th>
+              <th className="p-3 text-left text-sm font-semibold">Email</th>
               <th className="p-3 text-left text-sm font-semibold">Actions</th>
             </tr>
           </thead>
@@ -162,6 +166,7 @@ const Users = () => {
               <tr key={user.id} className="border-b hover:bg-gray-50">
                 <td className="p-3 text-gray-800">{user.username || 'N/A'}</td>
                 <td className="p-3 text-gray-800">{user.role || 'N/A'}</td>
+                <td className="p-3 text-gray-800">{user.email || 'N/A'}</td>
                 <td className="p-3 flex space-x-2">
                   <button
                     onClick={() => handleEdit(user)}
@@ -227,6 +232,17 @@ const Users = () => {
               <option value="admin">Admin</option>
               <option value="sales">Sales</option>
             </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Email</label>
+            <input
+              type="email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
+              className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-farmGreen focus:border-farmGreen"
+              required={!formData.id}
+            />
           </div>
           <div className="flex justify-end space-x-2">
             <button

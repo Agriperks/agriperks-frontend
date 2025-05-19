@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import Modal from 'react-modal';
 import Toast from '../components/Toast';
@@ -10,6 +9,7 @@ Modal.setAppElement('#root');
 const Prices = () => {
   const { user } = useAuth();
   const [prices, setPrices] = useState([]);
+  const [units, setUnits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [modalIsOpen, setModalIsOpen] = useState(false);
@@ -20,20 +20,64 @@ const Prices = () => {
     current_price: 0,
     location: '',
     date_updated: '',
+    unit: '',
   });
 
   const db = new Dexie('FarmPerksDB');
-  db.version(1).stores({ prices: '++id,product_name,current_price,location,date_updated,farm_id' });
+  db.version(1).stores({ prices: '++id,product_name,current_price,location,date_updated,unit,farm_id' });
 
   useEffect(() => {
-    const fetchPrices = async () => {
+    const fetchData = async () => {
       try {
         if (!user?.token) throw new Error('User is not authenticated');
-        const response = await axios.get('http://127.0.0.1:5000/api/prices', {
-          headers: { Authorization: `Bearer ${user.token}` },
+
+        // Fetch units
+        console.log('Fetching units for farm_id:', user.farm_id);
+        const unitsResponse = await fetch('http://127.0.0.1:5000/api/units', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${user.token}`,
+            'Content-Type': 'application/json',
+          },
         });
-        const items = Array.isArray(response.data.items) ? response.data.items : [];
-        setPrices(items.map(item => ({ ...item, date_updated: item.date_updated || null })));
+        if (!unitsResponse.ok) {
+          throw new Error(`Failed to fetch units: ${unitsResponse.status} ${await unitsResponse.text()}`);
+        }
+        const unitsData = await unitsResponse.json();
+        console.log('Units response:', unitsData);
+        const unitsItems = Array.isArray(unitsData.items) ? unitsData.items : [];
+        if (unitsItems.length === 0) {
+          console.warn('No units found in the database. Using fallback units.');
+          setUnits([
+            { id: 'fallback-1', name: 'kg' },
+            { id: 'fallback-2', name: 'litre' },
+            { id: 'fallback-3', name: 'dozen' },
+          ]);
+          setToast({ message: 'No units found in database. Using fallback units.', type: 'warning', visible: true });
+        } else {
+          setUnits(unitsItems);
+        }
+
+        // Fetch market prices
+        console.log('Fetching market prices...');
+        const pricesResponse = await fetch('http://127.0.0.1:5000/api/prices', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${user.token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (!pricesResponse.ok) {
+          throw new Error(`Failed to fetch prices: ${pricesResponse.status} ${await pricesResponse.text()}`);
+        }
+        const pricesData = await pricesResponse.json();
+        console.log('Prices response:', pricesData);
+        const items = Array.isArray(pricesData.items) ? pricesData.items : [];
+        setPrices(items.map(item => ({
+          ...item,
+          date_updated: item.date_updated || null,
+          unit: item.unit || null,
+        })));
       } catch (err) {
         console.error('Fetch error:', err);
         setError(err.message || 'Failed to load market prices');
@@ -46,13 +90,13 @@ const Prices = () => {
         setLoading(false);
       }
     };
-    fetchPrices();
+    fetchData();
   }, [user]);
 
   const openModal = () => setModalIsOpen(true);
   const closeModal = () => {
     setModalIsOpen(false);
-    setFormData({ id: null, product_name: '', current_price: 0, location: '', date_updated: '' });
+    setFormData({ id: null, product_name: '', current_price: 0, location: '', date_updated: '', unit: '' });
   };
 
   const showToast = (message, type = 'success') => {
@@ -72,34 +116,81 @@ const Prices = () => {
         current_price: parseFloat(formData.current_price),
         location: formData.location || null,
         date_updated: formData.date_updated || null,
+        unit: formData.unit || null,
       };
+      console.log('Submitting payload:', payload);
+
+      let response;
       if (formData.id) {
-        await axios.put(`http://127.0.0.1:5000/api/prices/${formData.id}`, payload, {
-          headers: { Authorization: `Bearer ${user.token}` },
+        response = await fetch(`http://127.0.0.1:5000/api/prices/${formData.id}`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${user.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
         });
+        if (!response.ok) {
+          throw new Error(`Failed to update market price: ${response.status} ${await response.text()}`);
+        }
         showToast('Market price updated successfully');
       } else {
-        const response = await axios.post('http://127.0.0.1:5000/api/prices', payload, {
-          headers: { Authorization: `Bearer ${user.token}` },
+        response = await fetch('http://127.0.0.1:5000/api/prices', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${user.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to add market price: ${response.status} ${errorText}`);
+        }
+        const data = await response.json();
+        let newMarketPrice = data.market_price || data;
+        if (!newMarketPrice || typeof newMarketPrice !== 'object') {
+          throw new Error('Invalid market price structure: ' + JSON.stringify(newMarketPrice));
+        }
+        if (!('id' in newMarketPrice)) {
+          throw new Error('Market price ID not found in response: ' + JSON.stringify(newMarketPrice));
+        }
+        await db.prices.put({
+          ...newMarketPrice,
+          farm_id: user.farm_id,
+          date_updated: newMarketPrice.date_updated || null,
+          unit: newMarketPrice.unit || null,
         });
         showToast('Market price added successfully');
-        await db.prices.add({ ...payload, id: response.data.price.id, farm_id: user.farm_id });
       }
-      const response = await axios.get('http://127.0.0.1:5000/api/prices', {
-        headers: { Authorization: `Bearer ${user.token}` },
+
+      const getResponse = await fetch('http://127.0.0.1:5000/api/prices', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${user.token}`,
+          'Content-Type': 'application/json',
+        },
       });
-      const items = Array.isArray(response.data.items) ? response.data.items : [];
-      setPrices(items.map(item => ({ ...item, date_updated: item.date_updated || null })));
+      if (!getResponse.ok) {
+        throw new Error(`Failed to fetch updated prices: ${getResponse.status} ${await getResponse.text()}`);
+      }
+      const getData = await getResponse.json();
+      const items = Array.isArray(getData.items) ? getData.items : [];
+      setPrices(items.map(item => ({
+        ...item,
+        date_updated: item.date_updated || null,
+        unit: item.unit || null,
+      })));
       closeModal();
     } catch (err) {
-      console.error('Submit error:', err);
-      const errorMessage = err.response?.data?.error?.message || 'Failed to save market price';
+      console.error('Submit error:', err.message);
+      const errorMessage = err.message || 'Failed to save market price';
       setError(errorMessage);
       showToast(errorMessage, 'error');
       if (err.message.includes('Network Error')) {
-        await db.prices.add({ ...formData, farm_id: user.farm_id });
+        await db.prices.add({ ...formData, farm_id: user.farm_id, id: Date.now() });
         showToast('Market price saved offline', 'info');
-        setPrices([...prices, { ...formData, id: Date.now() }]);
+        setPrices([...prices, { ...formData, id: Date.now(), date_updated: formData.date_updated || null }]);
         closeModal();
       }
     }
@@ -112,6 +203,7 @@ const Prices = () => {
       current_price: price.current_price || 0,
       location: price.location || '',
       date_updated: price.date_updated || '',
+      unit: price.unit || '',
     });
     openModal();
   };
@@ -120,15 +212,22 @@ const Prices = () => {
     if (window.confirm('Are you sure you want to delete this market price?')) {
       try {
         if (!user?.token) throw new Error('User is not authenticated');
-        await axios.delete(`http://127.0.0.1:5000/api/prices/${id}`, {
-          headers: { Authorization: `Bearer ${user.token}` },
+        const response = await fetch(`http://127.0.0.1:5000/api/prices/${id}`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${user.token}`,
+            'Content-Type': 'application/json',
+          },
         });
+        if (!response.ok) {
+          throw new Error(`Failed to delete market price: ${response.status} ${await response.text()}`);
+        }
         setPrices(prices.filter((p) => p.id !== id));
         await db.prices.delete(id);
         showToast('Market price deleted successfully');
       } catch (err) {
         console.error('Delete error:', err);
-        const errorMessage = err.response?.data?.error?.message || 'Failed to delete market price';
+        const errorMessage = err.message || 'Failed to delete market price';
         setError(errorMessage);
         showToast(errorMessage, 'error');
       }
@@ -169,6 +268,7 @@ const Prices = () => {
             <tr className="bg-farmGreen text-white">
               <th className="p-3 text-left text-sm font-semibold">Product</th>
               <th className="p-3 text-left text-sm font-semibold">Price</th>
+              <th className="p-3 text-left text-sm font-semibold">Unit</th>
               <th className="p-3 text-left text-sm font-semibold">Location</th>
               <th className="p-3 text-left text-sm font-semibold">Date Updated</th>
               <th className="p-3 text-left text-sm font-semibold">Actions</th>
@@ -179,6 +279,7 @@ const Prices = () => {
               <tr key={price.id} className="border-b hover:bg-gray-50">
                 <td className="p-3 text-gray-800">{price.product_name || 'N/A'}</td>
                 <td className="p-3 text-gray-800">{price.current_price ? `${formatNumber(price.current_price)} ${user?.currency || 'USD'}` : 'N/A'}</td>
+                <td className="p-3 text-gray-800">{price.unit || 'N/A'}</td>
                 <td className="p-3 text-gray-800">{price.location || 'N/A'}</td>
                 <td className="p-3 text-gray-800">{price.date_updated || 'N/A'}</td>
                 <td className="p-3 flex space-x-2">
@@ -234,6 +335,22 @@ const Prices = () => {
               min="0"
               step="0.01"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Unit</label>
+            <select
+              name="unit"
+              value={formData.unit}
+              onChange={handleChange}
+              className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-farmGreen focus:border-farmGreen"
+            >
+              <option value="">Select Unit</option>
+              {units.map((unit) => (
+                <option key={unit.id} value={unit.name}>
+                  {unit.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Location</label>

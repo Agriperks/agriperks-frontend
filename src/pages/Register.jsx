@@ -9,6 +9,8 @@ const Register = () => {
     farm_name: '',
     country: '',
     currency: '',
+    email: '',           // Added email field
+    phone_number: '',    // Added phone_number field
   });
   const [error, setError] = useState('');
   const navigate = useNavigate();
@@ -79,7 +81,7 @@ const Register = () => {
               className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-farmGreen"
             />
           </div>
-          <div className="mb-6">
+          <div className="mb-4">
             <label className="block text-farmBrown mb-2">Currency</label>
             <input
               type="text"
@@ -88,6 +90,28 @@ const Register = () => {
               onChange={handleChange}
               className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-farmGreen"
               placeholder="e.g., NGN"
+            />
+          </div>
+          <div className="mb-4">
+            <label className="block text-farmBrown mb-2">Email</label>
+            <input
+              type="email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-farmGreen"
+              required
+            />
+          </div>
+          <div className="mb-6">
+            <label className="block text-farmBrown mb-2">Phone Number</label>
+            <input
+              type="tel"
+              name="phone_number"
+              value={formData.phone_number}
+              onChange={handleChange}
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-farmGreen"
+              placeholder="e.g., +2348012345678"
             />
           </div>
           {error && <p className="text-red-500 mb-4">{error}</p>}
